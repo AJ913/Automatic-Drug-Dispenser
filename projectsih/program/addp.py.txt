@@ -1,0 +1,97 @@
+import RPi.GPIO as GPIO
+import time
+from picamera import PiCamera
+from pyzbar.pyzbar import decode
+import cv2
+
+# Initialize GPIO
+GPIO.setmode(GPIO.BCM)
+servo_pin = 18  # Adjust the GPIO pin number for the servo
+pir_pin = 17    # Adjust the GPIO pin number for the PIR sensor
+
+GPIO.setup(servo_pin, GPIO.OUT)
+GPIO.setup(pir_pin, GPIO.IN)
+
+# Create a PWM object with a frequency of 50 Hz for the servo
+pwm = GPIO.PWM(servo_pin, 50)
+
+# Function to set the servo angle smoothly with speed control
+def set_servo_angle(angle, speed=1.0):
+    current_angle = 90  # Start from the center position (90 degrees)
+    target_angle = angle
+
+    # Calculate the step size and direction based on speed
+    step_size = 1 if current_angle < target_angle else -1
+    num_steps = abs(target_angle - current_angle)
+   
+    for _ in range(num_steps):
+        current_angle -= step_size
+        pwm.ChangeDutyCycle(2.5 +(current_angle / 18.0))  # Convert angle to duty cycle
+        time.sleep(0.02 / speed)  # Adjust this delay for speed control
+
+# Function to stop the servo motor
+def stop_servo():
+    pwm.stop()
+
+# Function to capture an image using the Raspberry Pi Camera
+def capture_image(output_file):
+    with PiCamera() as camera:
+        camera.resolution = (1920, 1080)  # Set camera resolution
+        camera.start_preview()
+        time.sleep(2)  # Allow the camera to adjust to lighting conditions
+        camera.capture(output_file)
+
+# Function to read QR code from an image and return the decoded data
+def read_qr_code(image_path):
+    image = cv2.imread(image_path)
+    decoded_objects = decode(image)
+    if decoded_objects:
+        return decoded_objects[0].data.decode('utf-8')
+    return None
+
+try:
+    pwm.start(7.5)  # Start with the servo at its center position (90 degrees)
+   
+    while True:
+        if GPIO.input(pir_pin):
+            print("Motion detected.")
+           
+            # Capture an image using the camera
+            output_file = "captured_image.jpg"
+            capture_image(output_file)
+           
+            # Read the QR code from the captured image
+            qr_data = read_qr_code(output_file)
+           
+            if qr_data:
+                print("QR Code Data:", qr_data)
+               
+                # Split the QR code data into patient info, medicine name, and dosage
+                patient_info, medicine_name, dosage = map(str.strip, qr_data.split('\n'))
+               
+                print("Patient Info:", patient_info)
+                print("Medicine Name:", medicine_name)
+                print("Dosage:", dosage)
+               
+                # Dispense the medicine by moving the servo to a predefined angle
+                set_servo_angle(90)  # Adjust the angle for dispensing
+               
+                # Wait for a moment before returning the servo to the center position
+                time.sleep(1)
+                set_servo_angle(0)
+                stop_servo()
+                time.sleep(1)
+               
+       
+               
+               
+       
+        else:
+            print("No motion")
+           
+       
+        time.sleep(1)  # Adjust the delay as needed
+
+except KeyboardInterrupt:
+    stop_servo()
+    GPIO.cleanup()
